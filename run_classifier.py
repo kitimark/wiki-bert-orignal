@@ -25,6 +25,7 @@ import modeling
 import optimization
 import tokenization
 import tensorflow as tf
+import pandas as pd
 
 flags = tf.flags
 
@@ -372,6 +373,48 @@ class ColaProcessor(DataProcessor):
       examples.append(
           InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
     return examples
+
+
+class WikiQuestionTypeProcessor(DataProcessor):
+  """Processor for classify Wiki question type dataset"""
+
+  def get_train_examples(self, data_dir):
+    return self._create_examples(
+      self._read_file(os.path.join(data_dir, "wiki_train.json")), "train")
+
+  def get_dev_examples(self, data_dir):
+    """See base class."""
+    return self._create_examples(
+        self._read_file(os.path.join(data_dir, "wiki_dev.json")), "dev")
+
+  def get_test_examples(self, data_dir):
+    return self._create_examples(
+      self._read_file(os.path.join(data_dir, "wiki_test_set.json")), "test")
+
+  def get_labels(self):
+    """Labels of type of question
+      0 is the subjective question
+      1 is the dichotomous question (yes-no)
+    """
+    return ["0", "1"]
+
+  def _read_file(self, input_file):
+    with tf.gfile.Open(input_file, "r") as f:
+      reader = pd.read_json(f)['data']
+      return reader
+
+  def _create_examples(self, lines, set_type):
+    examples = []
+    for line in lines:
+      guid = "%s-%s" % (set_type, line["question_id"])
+      text_a = tokenization.convert_to_unicode(line['question'])
+      if set_type == "test":
+        label = "0"
+      else:
+        label = tokenization.convert_to_unicode(str(line['question_type']))
+      examples.append(
+        InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+    return examples 
 
 
 def convert_single_example(ex_index, example, label_list, max_seq_length,
@@ -788,6 +831,7 @@ def main(_):
       "mnli": MnliProcessor,
       "mrpc": MrpcProcessor,
       "xnli": XnliProcessor,
+      "wiki_question_type": WikiQuestionTypeProcessor,
   }
 
   tokenization.validate_case_matches_checkpoint(FLAGS.do_lower_case,
