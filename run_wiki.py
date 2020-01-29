@@ -276,6 +276,7 @@ def create_example(qa, is_training):
   question_text = tokenization.convert_to_unicode(qa["question"])
   start_position = None
   end_position = None
+  orig_answer_text = None
   is_impossible = False
   if is_training:
       
@@ -329,7 +330,7 @@ def read_squad_examples(input_file, is_training):
     # filter question
     input_data = filter(lambda x: x['question_type'] == 0, 
                         input_data)
-    input_data = list(input_data)
+    input_data = list(input_data)[:48]
 
   pool = multiprocessing.Pool()
   examples = pool.starmap(create_example, zip(input_data, repeat(is_training)))
@@ -945,14 +946,14 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
     all_nbest_json[example.qas_id] = nbest_json
 
   with tf.gfile.GFile(output_prediction_file, "w") as writer:
-    writer.write(json.dumps(all_predictions, indent=4) + "\n")
+    writer.write(json.dumps(all_predictions, indent=4, ensure_ascii=False) + "\n")
 
   with tf.gfile.GFile(output_nbest_file, "w") as writer:
-    writer.write(json.dumps(all_nbest_json, indent=4) + "\n")
+    writer.write(json.dumps(all_nbest_json, indent=4, ensure_ascii=False) + "\n")
 
   if FLAGS.version_2_with_negative:
     with tf.gfile.GFile(output_null_log_odds_file, "w") as writer:
-      writer.write(json.dumps(scores_diff_json, indent=4) + "\n")
+      writer.write(json.dumps(scores_diff_json, indent=4, ensure_ascii=False) + "\n")
 
 
 def get_final_text(pred_text, orig_text, do_lower_case):
