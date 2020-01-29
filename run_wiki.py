@@ -26,8 +26,14 @@ import random
 import modeling
 import optimization
 import tokenization
+import deepcut
 import six
 import tensorflow as tf
+
+from joblib import Parallel, delayed
+import multiprocessing
+from itertools import repeat
+
 
 flags = tf.flags
 
@@ -164,6 +170,7 @@ class SquadExample(object):
                qas_id,
                question_text,
                doc_tokens,
+               size_each_token,
                orig_answer_text=None,
                start_position=None,
                end_position=None,
@@ -171,6 +178,7 @@ class SquadExample(object):
     self.qas_id = qas_id
     self.question_text = question_text
     self.doc_tokens = doc_tokens
+    self.size_each_token = size_each_token
     self.orig_answer_text = orig_answer_text
     self.start_position = start_position
     self.end_position = end_position
@@ -224,85 +232,108 @@ class InputFeatures(object):
     self.is_impossible = is_impossible
 
 
+def create_example(qa, is_training):
+
+  def read_doc(id):
+    with tf.gfile.Open(os.path.join(
+        "documents-nsc", f"{id}.txt"), "r") as reader:
+      paragraph_text = reader.read().rstrip()
+      return paragraph_text
+
+  def find_answer_offset(doc_text, answer):
+    start_offset = doc_text.find(answer)
+    if start_offset == -1:
+      raise ValueError("Answer should have doc")
+    return start_offset
+
+  def is_whitespace(c):
+    if c == " " or c == "\t" or c == "\r" or c == "\n":
+      return True
+    return False
+
+  paragraph_text = tokenization.convert_to_unicode(
+      read_doc(qa["article_id"]))
+  init_doc_tokens = deepcut.tokenize(paragraph_text)
+  doc_tokens = []
+  size_each_token = []
+  char_to_word_offset = []
+  for token in init_doc_tokens:
+    new_token = True
+    for c in token:
+      if is_whitespace(c):
+        new_token = True
+      else:
+        if new_token:
+          doc_tokens.append(c)
+          size_each_token.append(0)
+        else:
+          doc_tokens[-1] += c
+        new_token = False
+      size_each_token[-1] += 1
+      char_to_word_offset.append(len(doc_tokens) - 1)
+    
+  qas_id = qa["question_id"]
+  question_text = tokenization.convert_to_unicode(qa["question"])
+  start_position = None
+  end_position = None
+  is_impossible = False
+  if is_training:
+      
+    if FLAGS.version_2_with_negative:
+      is_impossible = qa["is_impossible"]
+    if not is_impossible:
+      orig_answer_text = qa["answer"]
+      answer_offset = find_answer_offset(paragraph_text, orig_answer_text)
+      answer_length = len(orig_answer_text)
+      start_position = char_to_word_offset[answer_offset]
+      end_position = char_to_word_offset[answer_offset + answer_length - 1]
+
+      # Only add answers where the text can be exactly recovered from the
+      # document. If this CAN'T happen it's likely due to weird Unicode
+      # stuff so we will just skip the example.
+      #
+      # Note that this means for training mode, every example is NOT
+      # guaranteed to be preserved
+      actual_text = ""
+      for i in range(start_position, end_position + 1):
+        actual_text += doc_tokens[i]
+        if size_each_token[i] - len(doc_tokens[i]) == 1:
+          actual_text += "_"
+      actual_text = actual_text.strip("_")
+      cleaned_answer_text = "_".join(
+          tokenization.whitespace_tokenize(orig_answer_text))
+      if actual_text.find(cleaned_answer_text) == -1:
+        tf.logging.warning("Could not find answer: '%s' vs. '%s'",
+                           actual_text, cleaned_answer_text)
+    else:
+      start_position = -1
+      end_position = -1
+      orig_answer_text = ""
+      
+  example = SquadExample(
+    qas_id=qas_id,
+    question_text=question_text,
+    doc_tokens=doc_tokens,
+    size_each_token=size_each_token,
+    orig_answer_text=orig_answer_text,
+    start_position=start_position,
+    end_position=end_position,
+    is_impossible=is_impossible)
+  return example
+
+
 def read_squad_examples(input_file, is_training):
   """Read a SQuAD json file into a list of SquadExample."""
   with tf.gfile.Open(input_file, "r") as reader:
     input_data = json.load(reader)["data"]
+    # filter question
+    input_data = filter(lambda x: x['question_type'] == 0, 
+                        input_data)
+    input_data = list(input_data)
 
-  def is_whitespace(c):
-    if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
-      return True
-    return False
-
-  examples = []
-  for entry in input_data:
-    for paragraph in entry["paragraphs"]:
-      paragraph_text = paragraph["context"]
-      doc_tokens = []
-      char_to_word_offset = []
-      prev_is_whitespace = True
-      for c in paragraph_text:
-        if is_whitespace(c):
-          prev_is_whitespace = True
-        else:
-          if prev_is_whitespace:
-            doc_tokens.append(c)
-          else:
-            doc_tokens[-1] += c
-          prev_is_whitespace = False
-        char_to_word_offset.append(len(doc_tokens) - 1)
-
-      for qa in paragraph["qas"]:
-        qas_id = qa["id"]
-        question_text = qa["question"]
-        start_position = None
-        end_position = None
-        orig_answer_text = None
-        is_impossible = False
-        if is_training:
-
-          if FLAGS.version_2_with_negative:
-            is_impossible = qa["is_impossible"]
-          if (len(qa["answers"]) != 1) and (not is_impossible):
-            raise ValueError(
-                "For training, each question should have exactly 1 answer.")
-          if not is_impossible:
-            answer = qa["answers"][0]
-            orig_answer_text = answer["text"]
-            answer_offset = answer["answer_start"]
-            answer_length = len(orig_answer_text)
-            start_position = char_to_word_offset[answer_offset]
-            end_position = char_to_word_offset[answer_offset + answer_length -
-                                               1]
-            # Only add answers where the text can be exactly recovered from the
-            # document. If this CAN'T happen it's likely due to weird Unicode
-            # stuff so we will just skip the example.
-            #
-            # Note that this means for training mode, every example is NOT
-            # guaranteed to be preserved.
-            actual_text = " ".join(
-                doc_tokens[start_position:(end_position + 1)])
-            cleaned_answer_text = " ".join(
-                tokenization.whitespace_tokenize(orig_answer_text))
-            if actual_text.find(cleaned_answer_text) == -1:
-              tf.logging.warning("Could not find answer: '%s' vs. '%s'",
-                                 actual_text, cleaned_answer_text)
-              continue
-          else:
-            start_position = -1
-            end_position = -1
-            orig_answer_text = ""
-
-        example = SquadExample(
-            qas_id=qas_id,
-            question_text=question_text,
-            doc_tokens=doc_tokens,
-            orig_answer_text=orig_answer_text,
-            start_position=start_position,
-            end_position=end_position,
-            is_impossible=is_impossible)
-        examples.append(example)
-
+  pool = multiprocessing.Pool()
+  examples = pool.starmap(create_example, zip(input_data, repeat(is_training)))
+  
   return examples
 
 
