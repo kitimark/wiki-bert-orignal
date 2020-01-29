@@ -30,7 +30,6 @@ import deepcut
 import six
 import tensorflow as tf
 
-from joblib import Parallel, delayed
 import multiprocessing
 from itertools import repeat
 
@@ -247,7 +246,7 @@ def create_example(qa, is_training):
     return start_offset
 
   def is_whitespace(c):
-    if c == " " or c == "\t" or c == "\r" or c == "\n":
+    if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
       return True
     return False
 
@@ -299,9 +298,9 @@ def create_example(qa, is_training):
       for i in range(start_position, end_position + 1):
         actual_text += doc_tokens[i]
         if size_each_token[i] - len(doc_tokens[i]) == 1:
-          actual_text += "_"
-      actual_text = actual_text.strip("_")
-      cleaned_answer_text = "_".join(
+          actual_text += " "
+      actual_text = actual_text.strip(" ")
+      cleaned_answer_text = " ".join(
           tokenization.whitespace_tokenize(orig_answer_text))
       if actual_text.find(cleaned_answer_text) == -1:
         tf.logging.warning("Could not find answer: '%s' vs. '%s'",
