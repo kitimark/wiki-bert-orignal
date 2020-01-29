@@ -330,7 +330,7 @@ def read_squad_examples(input_file, is_training):
     # filter question
     input_data = filter(lambda x: x['question_type'] == 0, 
                         input_data)
-    input_data = list(input_data)[:48]
+    input_data = list(input_data)
 
   pool = multiprocessing.Pool()
   examples = pool.starmap(create_example, zip(input_data, repeat(is_training)))
