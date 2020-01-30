@@ -245,11 +245,6 @@ def create_example(qa, is_training):
       raise ValueError("Answer should have doc")
     return start_offset
 
-  def is_whitespace(c):
-    if c == " " or c == "\t" or c == "\r" or c == "\n" or ord(c) == 0x202F:
-      return True
-    return False
-
   paragraph_text = tokenization.convert_to_unicode(
       read_doc(qa["article_id"]))
   init_doc_tokens = deepcut.tokenize(paragraph_text)
@@ -259,7 +254,7 @@ def create_example(qa, is_training):
   for token in init_doc_tokens:
     new_token = True
     for c in token:
-      if is_whitespace(c):
+      if c.isspace():
         new_token = True
       else:
         if new_token:
