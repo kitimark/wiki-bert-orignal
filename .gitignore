@@ -114,3 +114,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Dataset
+documents-nsc
+multi_cased_*
+squad
+bert_base
+test_output
