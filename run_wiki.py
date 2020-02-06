@@ -328,6 +328,7 @@ def read_squad_examples(input_file, is_training):
 
   pool = multiprocessing.Pool()
   examples = pool.starmap(create_example, zip(input_data, repeat(is_training)))
+  pool.close()
   
   return examples
 

@@ -169,7 +169,6 @@ class SquadExample(object):
                qas_id,
                question_text,
                doc_tokens,
-               size_each_token,
                orig_answer_text=None,
                start_position=None,
                end_position=None,
@@ -177,7 +176,6 @@ class SquadExample(object):
     self.qas_id = qas_id
     self.question_text = question_text
     self.doc_tokens = doc_tokens
-    self.size_each_token = size_each_token
     self.orig_answer_text = orig_answer_text
     self.start_position = start_position
     self.end_position = end_position
@@ -245,16 +243,22 @@ def create_example(qa, is_training):
       raise ValueError("Answer should have doc")
     return start_offset
 
+  def replace_whitespace(text):
+    return "_".join(
+        tokenization.whitespace_tokenize(text))
+
   paragraph_text = tokenization.convert_to_unicode(
       read_doc(qa["article_id"]))
+  paragraph_text = replace_whitespace(paragraph_text)
   init_doc_tokens = deepcut.tokenize(paragraph_text)
   doc_tokens = []
   char_to_word_offset = []
   for token in init_doc_tokens:
     new_token = True
     for c in token:
-      if c.isspace():
+      if c == "_":
         new_token = True
+        doc_tokens.append(c)
       else:
         if new_token:
           doc_tokens.append(c)
@@ -265,6 +269,7 @@ def create_example(qa, is_training):
     
   qas_id = qa["question_id"]
   question_text = tokenization.convert_to_unicode(qa["question"])
+  question_text = replace_whitespace(question_text)
   start_position = None
   end_position = None
   orig_answer_text = None
@@ -274,7 +279,8 @@ def create_example(qa, is_training):
     if FLAGS.version_2_with_negative:
       is_impossible = qa["is_impossible"]
     if not is_impossible:
-      orig_answer_text = qa["answer"]
+      orig_answer_text = tokenization.convert_to_unicode(qa["answer"])
+      orig_answer_text = replace_whitespace(orig_answer_text)
       answer_offset = find_answer_offset(paragraph_text, orig_answer_text)
       answer_length = len(orig_answer_text)
       start_position = char_to_word_offset[answer_offset]
@@ -286,17 +292,13 @@ def create_example(qa, is_training):
       #
       # Note that this means for training mode, every example is NOT
       # guaranteed to be preserved
-      actual_text = ""
-      for i in range(start_position, end_position + 1):
-        actual_text += doc_tokens[i]
-        if size_each_token[i] - len(doc_tokens[i]) == 1:
-          actual_text += " "
-      actual_text = actual_text.strip(" ")
-      cleaned_answer_text = " ".join(
+      actual_text = "".join(
+          doc_tokens[start_position:(end_position + 1)])
+      cleaned_answer_text = "".join(
           tokenization.whitespace_tokenize(orig_answer_text))
       if actual_text.find(cleaned_answer_text) == -1:
         tf.logging.warning("Could not find answer: '%s' vs. '%s'",
-                           actual_text, cleaned_answer_text)
+                            actual_text, cleaned_answer_text)
     else:
       start_position = -1
       end_position = -1
@@ -306,7 +308,6 @@ def create_example(qa, is_training):
     qas_id=qas_id,
     question_text=question_text,
     doc_tokens=doc_tokens,
-    size_each_token=size_each_token,
     orig_answer_text=orig_answer_text,
     start_position=start_position,
     end_position=end_position,
@@ -325,6 +326,7 @@ def read_squad_examples(input_file, is_training):
 
   pool = multiprocessing.Pool()
   examples = pool.starmap(create_example, zip(input_data, repeat(is_training)))
+  pool.close()
   
   return examples
 
@@ -337,7 +339,12 @@ def convert_examples_to_features(examples, tokenizer, max_seq_length,
   unique_id = 1000000000
 
   for (example_index, example) in enumerate(examples):
-    query_tokens = tokenizer.tokenize(example.question_text)
+    query_tokens = []
+    question_token = deepcut.tokenize(example.question_text)
+    for token in question_token:
+      sub_tokens = tokenizer.tokenize(token)
+      for sub_token in sub_tokens:
+        query_tokens.append(sub_token)
 
     if len(query_tokens) > max_query_length:
       query_tokens = query_tokens[0:max_query_length]
