@@ -22,6 +22,7 @@ import collections
 import json
 import math
 import os
+import re
 import random
 import modeling
 import optimization
@@ -235,6 +236,7 @@ def create_example(qa, is_training):
     with tf.gfile.Open(os.path.join(
         "documents-nsc", f"{id}.txt"), "r") as reader:
       paragraph_text = reader.read().rstrip()
+      paragraph_text = re.sub(r'<.*?>', '', paragraph_text)
       return paragraph_text
 
   def find_answer_offset(doc_text, answer):
@@ -770,7 +772,7 @@ RawResult = collections.namedtuple("RawResult",
 
 def write_predictions(all_examples, all_features, all_results, n_best_size,
                       max_answer_length, do_lower_case, output_prediction_file,
-                      output_nbest_file, output_null_log_odds_file):
+                      output_nbest_file, output_raw_predictions_file, output_null_log_odds_file):
   """Write final predictions to the json file and log-odds of null if needed."""
   tf.logging.info("Writing predictions to: %s" % (output_prediction_file))
   tf.logging.info("Writing nbest to: %s" % (output_nbest_file))
@@ -948,6 +950,9 @@ def write_predictions(all_examples, all_features, all_results, n_best_size,
 
   with tf.gfile.GFile(output_nbest_file, "w") as writer:
     writer.write(json.dumps(all_nbest_json, indent=4, ensure_ascii=False) + "\n")
+
+  with tf.gfile.GFile(output_raw_predictions_file, "w") as writer:
+    writer.write(json.dumps(unique_id_to_result, indent=4, ensure_ascii=False) + "\n")
 
   if FLAGS.version_2_with_negative:
     with tf.gfile.GFile(output_null_log_odds_file, "w") as writer:
@@ -1298,12 +1303,14 @@ def main(_):
 
     output_prediction_file = os.path.join(FLAGS.output_dir, "predictions.json")
     output_nbest_file = os.path.join(FLAGS.output_dir, "nbest_predictions.json")
+    output_raw_predictions_file = os.path.join(FLAGS.output_dir, "raw_predictions.json")
     output_null_log_odds_file = os.path.join(FLAGS.output_dir, "null_odds.json")
 
     write_predictions(eval_examples, eval_features, all_results,
                       FLAGS.n_best_size, FLAGS.max_answer_length,
                       FLAGS.do_lower_case, output_prediction_file,
-                      output_nbest_file, output_null_log_odds_file)
+                      output_nbest_file, output_raw_predictions_file,
+                      output_null_log_odds_file)
 
 
 if __name__ == "__main__":
